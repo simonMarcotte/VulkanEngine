@@ -9,3 +9,4 @@
 #include <glm/glm.hpp>
 #include <gsl/gsl>
 #include <utilities.h>
+#include <functional>
