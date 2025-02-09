@@ -10,3 +10,5 @@
 #include <gsl/gsl>
 #include <utilities.h>
 #include <functional>
+#include <vector>
+#include <optional>
