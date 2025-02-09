@@ -2,8 +2,75 @@
 #include <graphics.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
+#include <spdlog/spdlog.h>
+
+#pragma region VK_FUNCTION_EXT_IMPL
+
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateDebugUtilsMessengerEXT(
+  VkInstance instance,
+  const VkDebugUtilsMessengerCreateInfoEXT* info, 
+  const VkAllocationCallbacks* allocator,
+  VkDebugUtilsMessengerEXT* debug_messenger
+) {
+
+  PFN_vkCreateDebugUtilsMessengerEXT function = 
+      reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
+
+  if (function != nullptr) {
+    return function(instance, info, allocator, debug_messenger);
+  } else {
+    return VK_ERROR_EXTENSION_NOT_PRESENT;
+  }
+}
+
+VKAPI_ATTR void VKAPI_CALL vkDestroyDebugUtilsMessengerEXT(
+  VkInstance instance,
+  VkDebugUtilsMessengerEXT debug_messenger, 
+  const VkAllocationCallbacks* allocator
+) {
+
+  PFN_vkDestroyDebugUtilsMessengerEXT function = 
+      reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
+
+  if (function != nullptr) {
+    function(instance, debug_messenger, allocator);
+  }
+}
+
+#pragma endregion
 
 namespace veng {
+
+#pragma region VK_VALIDATION
+//---------------VALIDATION LAYERS-------------------------
+
+std::vector<VkLayerProperties> Graphics::GetSupportedValidationlayers() {
+
+  std::uint32_t count;
+  vkEnumerateInstanceLayerProperties(&count, nullptr);
+
+  if (count == 0){
+    return {};
+  }
+
+  std::vector<VkLayerProperties> properties(count);
+  vkEnumerateInstanceLayerProperties(&count, properties.data());
+  return properties;
+}
+
+bool LayerMatchesName(gsl::czstring name, const VkLayerProperties& properties) {
+  return veng::streq(properties.layerName, name);
+}
+
+bool IsLayerSupported(gsl::span<VkLayerProperties> layers, gsl::czstring name) {
+   return std::any_of(layers.begin(), layers.end(), std::bind_front(LayerMatchesName, name));
+} 
+
+bool Graphics::AreAllLayersSupported(gsl::span<gsl::czstring> layers) {
+  std::vector<VkLayerProperties> supported_layers = GetSupportedValidationlayers();
+
+  return std::all_of(layers.begin(), layers.end(), std::bind_front(IsLayerSupported, supported_layers));
+}
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL ValidationCallBack(
   VkDebugUtilsMessageSeverityFlagBitsEXT severity,
@@ -11,10 +78,12 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL ValidationCallBack(
   const VkDebugUtilsMessengerCallbackDataEXT* callback_data,
   void* user_data
 ) {
-  if (severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT){
-    std::cout << "Validation Error: " << callback_data->pMessage << std::endl;
+
+
+  if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT){
+    spdlog::warn("Vulkan Validation: {}", callback_data->pMessage);
   } else {
-    std::cout << "Validation Message: " << callback_data->pMessage << std::endl;
+    spdlog::error("Vulkan Error: {}", callback_data->pMessage);
   }
   
   return VK_FALSE;
@@ -25,8 +94,7 @@ static VkDebugUtilsMessengerCreateInfoEXT GetCreateMessengerInfo() {
   creation_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
 
   creation_info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | 
-                                  VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT   | 
-                                  VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT;
+                                  VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
 
   creation_info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
                               VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
@@ -37,21 +105,24 @@ static VkDebugUtilsMessengerCreateInfoEXT GetCreateMessengerInfo() {
   return creation_info;
 }
 
-Graphics::Graphics(gsl::not_null<Window*> window) : window_(window) {
+void Graphics::SetupDebugMessenger() {
 
-  #if !defined(NDEBUG)
-    validation_enabled_ = true;
-  #endif
+  if (!validation_enabled_) {
+    return;
+  }
 
-  InitializeVulkan();
+  VkDebugUtilsMessengerCreateInfoEXT info = GetCreateMessengerInfo();
+  VkResult result = vkCreateDebugUtilsMessengerEXT(instance_, &info, nullptr, &debug_messenger_);
+  
+  if (result != VK_SUCCESS) {
+    spdlog::error("Cannot create debug messenger");
+  }
+
 }
 
-Graphics::~Graphics() {
-}
+#pragma endregion
 
-void Graphics::InitializeVulkan() {
-  CreateInstance();
-}
+#pragma region VK_INSTANCE_AND_EXTENSIONS
 
 void Graphics::CreateInstance() {
 
@@ -150,35 +221,32 @@ bool Graphics::AreAllExtensionsSupported(gsl::span<gsl::czstring> extensions) {
   return std::all_of(extensions.begin(), extensions.end(), std::bind_front(IsExtensionSupported, supported_extensions));
 }
 
+#pragma endregion
 
-//---------------VALIDATION LAYERS-------------------------
+Graphics::Graphics(gsl::not_null<Window*> window) : window_(window) {
 
-std::vector<VkLayerProperties> Graphics::GetSupportedValidationlayers() {
+  #if !defined(NDEBUG)
+    validation_enabled_ = true;
+  #endif
 
-  std::uint32_t count;
-  vkEnumerateInstanceLayerProperties(&count, nullptr);
+  InitializeVulkan();
+}
 
-  if (count == 0){
-    return {};
+Graphics::~Graphics() {
+  
+  if (instance_ != nullptr) {
+
+    if (debug_messenger_ != nullptr){
+      vkDestroyDebugUtilsMessengerEXT(instance_, debug_messenger_, nullptr);
+    }
+
+    vkDestroyInstance(instance_, nullptr);
   }
-
-  std::vector<VkLayerProperties> properties(count);
-  vkEnumerateInstanceLayerProperties(&count, properties.data());
-  return properties;
 }
 
-bool LayerMatchesName(gsl::czstring name, const VkLayerProperties& properties) {
-  return veng::streq(properties.layerName, name);
-}
-
-bool IsLayerSupported(gsl::span<VkLayerProperties> layers, gsl::czstring name) {
-   return std::any_of(layers.begin(), layers.end(), std::bind_front(LayerMatchesName, name));
-} 
-
-bool Graphics::AreAllLayersSupported(gsl::span<gsl::czstring> layers) {
-  std::vector<VkLayerProperties> supported_layers = GetSupportedValidationlayers();
-
-  return std::all_of(layers.begin(), layers.end(), std::bind_front(IsLayerSupported, supported_layers));
+void Graphics::InitializeVulkan() {
+  CreateInstance();
+  SetupDebugMessenger();
 }
 
 }  // namespace veng
