@@ -3,6 +3,7 @@
 #include <GLFW/glfw3.h>
 #include <iostream>
 #include <spdlog/spdlog.h>
+#include <set>
 
 #pragma region VK_FUNCTION_EXT_IMPL
 
@@ -242,6 +243,15 @@ Graphics::QueueFamilyIndicies Graphics::FindQueueFamilies(VkPhysicalDevice devic
   QueueFamilyIndicies result;
   result.graphics_family = graphics_family_it - families.begin();
 
+  for (std::uint32_t i = 0; i < families.size(); i++){
+    VkBool32 has_presentation_support = false;
+    vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface_, &has_presentation_support);
+    if(has_presentation_support){
+      result.presentation_family = i;
+      break;
+    }
+  }
+
   return result;
 
 }
@@ -290,20 +300,28 @@ void Graphics::CreateLogicalDeviceAndQueues(){
     std::exit(EXIT_FAILURE);
   }
 
+  std::set<uint32_t> unique_queue_families = {picked_device_families.graphics_family.value(), picked_device_families.graphics_family.value()};
+
   std::float_t queue_priority = 1.0f;
 
-  VkDeviceQueueCreateInfo queue_info = {};
-  queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-  queue_info.queueFamilyIndex = picked_device_families.graphics_family.value();
-  queue_info.queueCount = 1;
-  queue_info.pQueuePriorities = &queue_priority;
+  std::vector<VkDeviceQueueCreateInfo> queue_create_infos;
+  for(std::uint32_t unique_queue_family : unique_queue_families){
+    VkDeviceQueueCreateInfo queue_info = {};
+    queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queue_info.queueFamilyIndex = unique_queue_family;
+    queue_info.queueCount = 1;
+    queue_info.pQueuePriorities = &queue_priority;
+    queue_create_infos.push_back(queue_info);
+  }
+
+
 
   VkPhysicalDeviceFeatures required_features = {};
 
   VkDeviceCreateInfo device_info = {};
   device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-  device_info.queueCreateInfoCount = 1;
-  device_info.pQueueCreateInfos = &queue_info;
+  device_info.queueCreateInfoCount = queue_create_infos.size();
+  device_info.pQueueCreateInfos = queue_create_infos.data();
   device_info.pEnabledFeatures = &required_features;
   device_info.enabledExtensionCount = 0;
   device_info.enabledLayerCount = 0; //deprecated
@@ -314,11 +332,27 @@ void Graphics::CreateLogicalDeviceAndQueues(){
     std::exit(EXIT_FAILURE);
   }
 
-  vkGetDeviceQueue(logical_device_, queue_info.queueFamilyIndex, 0, &graphics_queue_);
+  vkGetDeviceQueue(logical_device_, picked_device_families.graphics_family.value(), 0, &graphics_queue_);
+  vkGetDeviceQueue(logical_device_, picked_device_families.presentation_family.value(), 0, &present_queue_);
 
 }
 
 #pragma endregion
+
+#pragma region PRESENTATION
+
+void Graphics::CreateSurface(){
+
+  VkResult result = glfwCreateWindowSurface(instance_, window_->GetHandle(), nullptr, &surface_);
+
+  if (result != VK_SUCCESS){
+    std::exit(EXIT_FAILURE);
+  }
+
+}
+
+#pragma endregion
+
 
 Graphics::Graphics(gsl::not_null<Window*> window) : window_(window) {
 
@@ -336,6 +370,9 @@ Graphics::~Graphics() {
   }
   
   if (instance_ != nullptr) {
+    if (surface_ != VK_NULL_HANDLE){
+      vkDestroySurfaceKHR(instance_, surface_, nullptr);
+    }
     if (debug_messenger_ != nullptr){
       vkDestroyDebugUtilsMessengerEXT(instance_, debug_messenger_, nullptr);
     }
@@ -346,6 +383,7 @@ Graphics::~Graphics() {
 void Graphics::InitializeVulkan() {
   CreateInstance();
   SetupDebugMessenger();
+  CreateSurface();
   PickPhysicalDevice();
   CreateLogicalDeviceAndQueues();
 }
