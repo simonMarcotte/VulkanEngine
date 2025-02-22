@@ -21,12 +21,21 @@ class Graphics final {
     bool IsValid() const { return graphics_family.has_value() && presentation_family.has_value();}
   };
 
+  struct SwapChainProperties {
+    VkSurfaceCapabilitiesKHR capabilities;
+    std::vector<VkSurfaceFormatKHR> formats;
+    std::vector<VkPresentModeKHR> present_modes;
+
+    bool IsValid() const { return !formats.empty() && !present_modes.empty();}
+  };
+
   void InitializeVulkan();
   void CreateInstance();
   void SetupDebugMessenger();
   void PickPhysicalDevice();
   void CreateLogicalDeviceAndQueues();
   void CreateSurface();
+  void CreateSwapChain();
 
   std::vector<gsl::czstring> GetRequiredInstanceExtensions();
 
@@ -38,8 +47,20 @@ class Graphics final {
   static bool AreAllLayersSupported(gsl::span<gsl::czstring> extensions);
 
   QueueFamilyIndicies FindQueueFamilies(VkPhysicalDevice device);
+  SwapChainProperties GetSwapChainProperties(VkPhysicalDevice device);
   bool IsDeviceSuitable(VkPhysicalDevice device);
   std::vector<VkPhysicalDevice> GetAvailableDevices();
+  bool AreAllDeviceExtensionSupported(VkPhysicalDevice device);
+  std::vector<VkExtensionProperties> GetDeviceAvailableExtensions(VkPhysicalDevice device);
+
+  VkSurfaceFormatKHR ChooseSwapSurfaceFormat(gsl::span<VkSurfaceFormatKHR> formats);
+  VkPresentModeKHR ChooseSwapPresentMode(gsl::span<VkPresentModeKHR> modes);
+  VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities);
+
+
+  std::array<gsl::czstring, 1> required_device_extensions_ = {
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME
+  };
 
   VkInstance instance_ = VK_NULL_HANDLE;
   VkDebugUtilsMessengerEXT debug_messenger_;
