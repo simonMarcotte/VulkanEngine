@@ -618,17 +618,9 @@ void Graphics::CreateGraphicsPipeline(){
   dynamic_state_info.dynamicStateCount = dynamic_states.size();
   dynamic_state_info.pDynamicStates = dynamic_states.data();
 
-  VkViewport viewport = {};
-  viewport.x = 0.0f;
-  viewport.y = 0.0f;
-  viewport.width = static_cast<std::float_t>(extent_.width);
-  viewport.height = static_cast<std::float_t>(extent_.height);
-  viewport.minDepth = 0.0f;
-  viewport.maxDepth = 1.0f;
+  VkViewport viewport = GetViewport();
 
-  VkRect2D scissor = {};
-  scissor.offset = {0, 0};
-  scissor.extent = extent_;
+  VkRect2D scissor = GetScissor();
 
   VkPipelineViewportStateCreateInfo viewport_info = {};
   viewport_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -700,6 +692,27 @@ void Graphics::CreateGraphicsPipeline(){
     std::exit(EXIT_FAILURE);
   }
 
+}
+
+VkViewport Graphics::GetViewport(){
+  VkViewport viewport = {};
+  viewport.x = 0.0f;
+  viewport.y = 0.0f;
+  viewport.width = static_cast<std::float_t>(extent_.width);
+  viewport.height = static_cast<std::float_t>(extent_.height);
+  viewport.minDepth = 0.0f;
+  viewport.maxDepth = 1.0f;
+  
+  return viewport;
+}
+
+VkRect2D Graphics::GetScissor(){
+
+  VkRect2D scissor = {};
+  scissor.offset = {0, 0};
+  scissor.extent = extent_;
+
+  return scissor;
 }
 
 void Graphics::CreateRenderPass(){
@@ -792,7 +805,76 @@ void Graphics::CreateCommandBuffer(){
   }
 }
 
+
+void Graphics::BeginCommands(std::uint32_t current_image_index){
+  VkCommandBufferBeginInfo begin_info = {};
+  begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  
+  VkResult begin_state = vkBeginCommandBuffer(command_buffer_, &begin_info);
+  if(begin_state != VK_SUCCESS) {
+    throw std :: runtime_error("Failed to begin command buffer!");
+  }
+
+  VkRenderPassBeginInfo render_pass_begin_info = {};
+  render_pass_begin_info. sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+  render_pass_begin_info.renderPass = render_pass_;
+  render_pass_begin_info. framebuffer = swap_chain_framebuffers_[current_image_index];
+  render_pass_begin_info.renderArea.offset = {0, 0};
+  render_pass_begin_info.renderArea.extent = extent_;
+
+  VkClearValue clear_color = {{{0.0f, 0.0f, 0.0f, 1.0f}}}; //rgb, transparency
+  render_pass_begin_info.clearValueCount = 1;
+  render_pass_begin_info.pClearValues = &clear_color;
+
+  vkCmdBeginRenderPass(command_buffer_, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
+  vkCmdBindPipeline(command_buffer_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
+  VkViewport viewport = GetViewport();
+  VkRect2D scissor = GetScissor();
+
+  vkCmdSetViewport(command_buffer_, 0, 1, &viewport);
+  vkCmdSetScissor(command_buffer_, 0, 1, &scissor);
+
+}
+
+void Graphics::RenderTriangle(){
+
+  vkCmdDraw(command_buffer_, 3, 1, 0, 0);
+
+}
+
+void Graphics::EndCommands(){
+  vkCmdEndRenderPass(command_buffer_);
+  VkResult end_buffer_result = vkEndCommandBuffer(command_buffer_);
+  if(end_buffer_result != VK_SUCCESS){
+    throw std::runtime_error("Failed to record command buffer!");
+  }
+}
+
+void Graphics::CreateSignals(){
+  VkSemaphoreCreateInfo semaphore_info = {};
+  semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+  
+  VkFenceCreateInfo fence_info = {};
+  fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+
+  if(vkCreateSemaphore(logical_device_, &semaphore_info, nullptr, &image_available_signal_) != VK_SUCCESS){
+    std::exit(EXIT_FAILURE);
+  }
+  if(vkCreateSemaphore(logical_device_, &semaphore_info, nullptr, &render_finished_singal_) != VK_SUCCESS){
+    std::exit(EXIT_FAILURE);
+  }
+  if(vkCreateFence(logical_device_, &fence_info, nullptr, &still_rendering_fence_) != VK_SUCCESS){
+    std::exit(EXIT_FAILURE);
+  }
+
+
+
+}
+
 #pragma endregion
+
+
 Graphics::Graphics(gsl::not_null<Window*> window) : window_(window) {
 
   #if !defined(NDEBUG)
@@ -805,6 +887,17 @@ Graphics::Graphics(gsl::not_null<Window*> window) : window_(window) {
 Graphics::~Graphics() {
 
   if (logical_device_ != nullptr){
+
+    if(image_available_signal_ != VK_NULL_HANDLE) {
+      vkDestroySemaphore(logical_device_, image_available_signal_, nullptr);
+    }
+    if(render_finished_singal_ != VK_NULL_HANDLE) {
+      vkDestroySemaphore(logical_device_, render_finished_singal_, nullptr);
+    }
+    if(still_rendering_fence_ != VK_NULL_HANDLE) {
+      vkDestroyFence(logical_device_, still_rendering_fence_, nullptr);
+    }
+
     if(command_pool_ != VK_NULL_HANDLE){
       vkDestroyCommandPool(logical_device_, command_pool_, nullptr);
     }
@@ -859,6 +952,7 @@ void Graphics::InitializeVulkan() {
   CreateFrameBuffers();
   CreateCommandPool();
   CreateCommandBuffer();
+  CreateSignals();
 }
 
 }  // namespace veng

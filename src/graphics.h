@@ -29,6 +29,7 @@ class Graphics final {
     bool IsValid() const { return !formats.empty() && !present_modes.empty();}
   };
 
+  //Initialization
   void InitializeVulkan();
   void CreateInstance();
   void SetupDebugMessenger();
@@ -42,6 +43,14 @@ class Graphics final {
   void CreateFrameBuffers();
   void CreateCommandPool();
   void CreateCommandBuffer();
+  void CreateSignals();
+
+  //Rendering
+  void BeginFrame();
+  void BeginCommands(std::uint32_t current_image_index);
+  void RenderTriangle();
+  void EndCommands();
+  void EndFrame();
 
   std::vector<gsl::czstring> GetRequiredInstanceExtensions();
 
@@ -66,6 +75,8 @@ class Graphics final {
 
   VkShaderModule CreateShaderModule(gsl::span<std::uint8_t> buffer);
 
+  VkViewport GetViewport();
+  VkRect2D GetScissor();
 
   std::array<gsl::czstring, 1> required_device_extensions_ = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME
@@ -94,6 +105,10 @@ class Graphics final {
 
   VkCommandPool command_pool_ = VK_NULL_HANDLE;
   VkCommandBuffer command_buffer_ = VK_NULL_HANDLE;
+
+  VkSemaphore image_available_signal_ = VK_NULL_HANDLE;
+  VkSemaphore render_finished_singal_ = VK_NULL_HANDLE;
+  VkFence still_rendering_fence_ = VK_NULL_HANDLE;
 
   gsl::not_null<Window*> window_;
   bool validation_enabled_ = true;
