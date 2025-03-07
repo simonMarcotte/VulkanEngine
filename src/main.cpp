@@ -11,10 +11,13 @@ std::int32_t main() {
   veng::Window window("Vulkan Engine", {800, 600});
   window.TryMoveToMonitor(0);
 
-  veng::Graphics mygraphics(&window);
+  veng::Graphics graphics(&window);
 
   while (!window.ShouldClose()) {
     glfwPollEvents();
+    graphics.BeginFrame();
+    graphics.RenderTriangle();
+    graphics.EndFrame();
   }
 
   return EXIT_SUCCESS;

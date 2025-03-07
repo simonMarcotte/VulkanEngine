@@ -12,6 +12,10 @@ class Graphics final {
   Graphics(gsl::not_null<Window*> window);
   ~Graphics();
 
+  void BeginFrame();
+  void RenderTriangle();
+  void EndFrame();
+
  private:
 
   struct QueueFamilyIndicies {
@@ -46,11 +50,9 @@ class Graphics final {
   void CreateSignals();
 
   //Rendering
-  void BeginFrame();
-  void BeginCommands(std::uint32_t current_image_index);
-  void RenderTriangle();
+  void BeginCommands();
   void EndCommands();
-  void EndFrame();
+  
 
   std::vector<gsl::czstring> GetRequiredInstanceExtensions();
 
@@ -109,6 +111,9 @@ class Graphics final {
   VkSemaphore image_available_signal_ = VK_NULL_HANDLE;
   VkSemaphore render_finished_singal_ = VK_NULL_HANDLE;
   VkFence still_rendering_fence_ = VK_NULL_HANDLE;
+
+
+  std::uint32_t current_image_index_ = 0;
 
   gsl::not_null<Window*> window_;
   bool validation_enabled_ = true;
