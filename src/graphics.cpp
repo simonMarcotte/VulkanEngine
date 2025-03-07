@@ -4,6 +4,7 @@
 #include <iostream>
 #include <spdlog/spdlog.h>
 #include <set>
+#include <utilities.h>
 
 #pragma region VK_FUNCTION_EXT_IMPL
 
@@ -384,6 +385,59 @@ void Graphics::CreateLogicalDeviceAndQueues(){
 
 #pragma region PRESENTATION
 
+#pragma region GRAPHCIS_PIPELINE
+
+VkShaderModule Graphics::CreateShaderModule(gsl::span<std::uint8_t> buffer){
+  if(buffer.size()){
+    return VK_NULL_HANDLE;
+  }
+
+  VkShaderModuleCreateInfo info = {};
+  info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+  info.codeSize = buffer.size();
+  info.pCode = reinterpret_cast<std::uint32_t*>(buffer.data());
+
+
+  VkShaderModule shader_module;
+  VkResult result = vkCreateShaderModule(logical_device_, &info, nullptr, &shader_module);
+  if(result == VK_SUCCESS){
+    return VK_NULL_HANDLE;
+  }
+  return shader_module;
+}
+
+void Graphics::CreateGraphicsPipeline(){
+
+  std::vector<std::uint8_t> basic_vertex_data = ReadFile("./basic.vert.spv");
+  VkShaderModule vertex_shader = CreateShaderModule(basic_vertex_data);
+  gsl::final_action _destroy_vertex([this, vertex_shader] () {vkDestroyShaderModule(logical_device_, vertex_shader, nullptr);});
+
+  std::vector<std::uint8_t> basic_fragment_data = ReadFile("./basic.frag.spv");
+  VkShaderModule fragment_shader = CreateShaderModule(basic_fragment_data);
+  gsl::final_action _destroy_fragment([this, fragment_shader] () {vkDestroyShaderModule(logical_device_, fragment_shader, nullptr);});
+
+  if(vertex_shader == VK_NULL_HANDLE || fragment_shader == VK_NULL_HANDLE){
+    std::exit(EXIT_FAILURE);
+  }
+
+  VkPipelineShaderStageCreateInfo vertex_stage_info = {};
+  vertex_stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  vertex_stage_info.stage = VK_SHADER_STAGE_VERTEX_BIT;
+  vertex_stage_info.module = vertex_shader;
+  vertex_stage_info.pName = "main";
+
+  VkPipelineShaderStageCreateInfo fragment_stage_info = {};
+  fragment_stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  fragment_stage_info.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+  fragment_stage_info.module = fragment_shader;
+  fragment_stage_info.pName = "main";
+
+  VkPipelineShaderStageCreateInfo stage_infos[] = {vertex_stage_info, fragment_stage_info};
+
+}
+
+#pragma endregion
+
 void Graphics::CreateSurface(){
 
   VkResult result = glfwCreateWindowSurface(instance_, window_->GetHandle(), nullptr, &surface_);
@@ -462,14 +516,96 @@ VkExtent2D Graphics::ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabiliti
   }
 }
 
+std::uint32_t Graphics::ChooseSwapImageCount(const VkSurfaceCapabilitiesKHR& capabilities){
+  
+  std::uint32_t image_count = capabilities.minImageCount + 1;
+  if (capabilities.maxImageCount > 0 && capabilities.maxImageCount < image_count){
+    image_count = capabilities.maxImageCount;
+  }
+  return image_count;
+}
+
+
 void Graphics::CreateSwapChain(){
 
   SwapChainProperties properties = GetSwapChainProperties(physcial_device_);
 
-  VkSurfaceFormatKHR surface_format = ChooseSwapSurfaceFormat(properties.formats);
-  VkPresentModeKHR present_mode = ChooseSwapPresentMode(properties.present_modes);
-  VkExtent2D extent = ChooseSwapExtent(properties.capabilities);
+  surface_format_ = ChooseSwapSurfaceFormat(properties.formats);
+  present_mode_ = ChooseSwapPresentMode(properties.present_modes);
+  extent_ = ChooseSwapExtent(properties.capabilities);
 
+  std::uint32_t image_count = ChooseSwapImageCount(properties.capabilities);
+
+  VkSwapchainCreateInfoKHR info = {};
+  info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+  info.surface = surface_;
+  info.minImageCount = image_count;
+  info.imageFormat = surface_format_.format;
+  info.imageExtent = extent_;
+  info.imageColorSpace = surface_format_.colorSpace;
+  info.imageArrayLayers = 1;
+  info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+  info.presentMode = present_mode_;
+  info.preTransform = properties.capabilities.currentTransform;
+  info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+  info.clipped = VK_TRUE;
+  info.oldSwapchain = VK_NULL_HANDLE;
+
+  QueueFamilyIndicies indices = FindQueueFamilies(physcial_device_);
+
+  if (indices.graphics_family != indices.presentation_family){
+    std::array<std::uint32_t, 2> family_indices = {
+      indices.graphics_family.value(),
+      indices.presentation_family.value(),
+    };
+
+    info.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+    info.queueFamilyIndexCount = family_indices.size();
+    info.pQueueFamilyIndices = family_indices.data();
+  } else {
+    info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  }
+
+  VkResult result = vkCreateSwapchainKHR(logical_device_, &info, nullptr, &swap_chain_);
+  if (result != VK_SUCCESS){
+    std::exit(EXIT_FAILURE);
+  }
+
+  std::uint32_t actual_image_count;
+  vkGetSwapchainImagesKHR(logical_device_, swap_chain_, &actual_image_count, nullptr);
+  swap_chain_images_.resize(actual_image_count);
+  vkGetSwapchainImagesKHR(logical_device_, swap_chain_, &actual_image_count, swap_chain_images_.data());
+
+}
+
+
+void Graphics::CreateImageViews(){
+
+  swap_chain_image_views_.resize(swap_chain_images_.size());
+
+  auto image_view_it = swap_chain_image_views_.begin();
+  for (VkImage image : swap_chain_images_){
+    VkImageViewCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    info.image = image;
+    info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    info.format = surface_format_.format;
+    info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+    info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+    info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+    info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+    info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    info.subresourceRange.baseMipLevel = 0;
+    info.subresourceRange.levelCount = 1;
+    info.subresourceRange.baseArrayLayer = 0;
+    info.subresourceRange.layerCount = 1;
+
+    VkResult result = vkCreateImageView(logical_device_, &info, nullptr, &*image_view_it);
+    if (result != VK_SUCCESS){
+      std::exit(EXIT_FAILURE);
+    }
+    std::next(image_view_it);
+  }
 
 }
 
@@ -488,6 +624,15 @@ Graphics::Graphics(gsl::not_null<Window*> window) : window_(window) {
 Graphics::~Graphics() {
 
   if (logical_device_ != nullptr){
+    
+    for(VkImageView image_view : swap_chain_image_views_){
+      vkDestroyImageView(logical_device_, image_view, nullptr);
+    }
+
+    if (swap_chain_ != VK_NULL_HANDLE){
+      vkDestroySwapchainKHR(logical_device_, swap_chain_, nullptr);
+    }
+
     vkDestroyDevice(logical_device_, nullptr);
   }
   
@@ -509,6 +654,7 @@ void Graphics::InitializeVulkan() {
   PickPhysicalDevice();
   CreateLogicalDeviceAndQueues();
   CreateSwapChain();
+  CreateGraphicsPipeline();
 }
 
 }  // namespace veng
